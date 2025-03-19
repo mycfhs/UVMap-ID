@@ -137,9 +137,10 @@ def set_ip_adapter(unet, num_tokens=4, scale=0.5):
 
     tensors={}
     unet_model_path_finetuned = args.pretrained_model_name_or_path \
-                                + f"/checkpoint-{args.resume_ckpt}" \
                                 + "/unet" \
                                 + "/diffusion_pytorch_model.safetensors"
+                                # + f"/checkpoint-{args.resume_ckpt}" \
+                                
     with safe_open(unet_model_path_finetuned, framework="pt", device="cpu") as f:
         for key in f.keys():
             tensors[key] = f.get_tensor(key)
@@ -149,14 +150,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--pretrained_model_name_or_path", default="runwayml/stable-diffusion-v1-5", type=str, help="Path to the model to use.")
-    parser.add_argument("--vae_model_name_or_path", default="runwayml/stable-diffusion-v1-5", type=str, help="Path to the model to use.")
+    parser.add_argument("--pretrained_model_name_or_path", default="./simplitex-trained-model-ipa-lora_newdata_no_flag", type=str, help="Path to the model to use.")
+    parser.add_argument("--vae_model_name_or_path", default="./simplitex-trained-model-ipa-lora_newdata_no_flag", type=str, help="Path to the model to use.")
     parser.add_argument("--guidance_scale", type=float, default=7.5, help="Value of guidance step")
     parser.add_argument("--instance_prompt", type=str, default="an Asian woman ",
                         help="Prompt to use. Use sks texture map as part of your prompt for best results")
     parser.add_argument("--negative_instance_prompt", type=str, default="monochrome, lowres, bad anatomy, worst quality, low quality, blurry",
                         help="Prompt to use. Use sks texture map as part of your prompt for best results")
-    parser.add_argument("--output_path", type=str, default="target", help="Directory which to save the results")
+    parser.add_argument("--output_path", type=str, default="./output", help="Directory which to save the results")
     parser.add_argument("--validation_image_embeds", type=str, default="target", help="Directory which to save the results")
     parser.add_argument("--validation_images", type=str, default="target", help="Directory which to save the results")
     parser.add_argument("--num_inference_steps", type=int, default=30, help="Number of inference steps")
@@ -171,7 +172,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print("current prompt is:", args.instance_prompt)
     noise_scheduler = DDIMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
-    vae = AutoencoderKL.from_pretrained(args.vae_model_name_or_path, revision=args.revision).to(device)
+    vae = AutoencoderKL.from_pretrained(args.vae_model_name_or_path, subfolder="vae", revision=args.revision).to(device)
     #unet = UNet2DConditionModel.from_pretrained('/home/jichao.zhang/code/UVMap-ID/Realistic_Vision_V4.0_noVAE', subfolder="unet", revision=args.revision,).to(device)
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision,).to(device)
     text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder").to(device)
@@ -191,7 +192,28 @@ if __name__ == "__main__":
     # exit()
     set_ip_adapter(unet)
 
-    faceid_embeds = torch.from_numpy(np.load(args.validation_image_embeds)).unsqueeze(0)
+    # arr = np.load(args.validation_image_embeds)
+
+    from PIL import Image
+    import cv2
+    import numpy as np
+    from insightface.app import FaceAnalysis
+
+    app = FaceAnalysisapp = FaceAnalysis(name='buffalo_l', allowed_modules=['recognition', 'detection'])
+    app.prepare(ctx_id=0, det_size=(640, 640))
+
+    img = cv2.imread(args.validation_image_embeds)
+    faces = app.get(img)
+    arr = faces[0].embedding 
+    arr = arr / np.linalg.norm(arr)
+    # arr = (arr - np.mean(arr)) / np.std(arr)
+    arr = arr.reshape(1, 512)
+    
+    # print("___________________________")
+    # print(arr.shape)
+    # input()
+    
+    faceid_embeds = torch.from_numpy(arr.copy()).unsqueeze(0)
 
     do_classifier_free_guidance = True
     noise_scheduler.set_timesteps(args.num_inference_steps, device=device)
@@ -232,7 +254,7 @@ if __name__ == "__main__":
 
     num_warmup_steps = len(timesteps) - args.num_inference_steps * noise_scheduler.order
     with torch.no_grad():
-        for number in range(100):
+        for number in range(10):
             latents = randn_tensor(shape, device=device)
             for i, t in enumerate(timesteps):
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
